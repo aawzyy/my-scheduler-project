@@ -1,11 +1,14 @@
-# HANYA SATU TAHAP: Serve dengan Nginx
+# HANYA SATU TAHAP: Production
 FROM nginx:stable-alpine
 
-# Copy folder dist yang sudah Anda build di laptop
+# 1. Copy hasil build Vue (dist)
 COPY dist /usr/share/nginx/html
 
-# Copy konfigurasi Nginx
+# 2. Copy konfigurasi Nginx custom kita (INI BARU)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Expose port 80
 EXPOSE 80
+
+# Jalankan Nginx
 CMD ["nginx", "-g", "daemon off;"]
