@@ -28,6 +28,7 @@ spring:
               - profile
               - email
               - https://www.googleapis.com/auth/calendar
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             authorization-grant-type: authorization_code
         provider:
           google:
