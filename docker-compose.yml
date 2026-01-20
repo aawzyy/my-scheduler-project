@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # 1. DATABASE (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: scheduler_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      # UBAH: Baca password dari file .env
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: scheduler_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # 2. BACKEND (Spring Boot)
+  backend:
+    build: ./scheduler-api
+    container_name: scheduler_api
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      # --- KONEKSI DB ---
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/scheduler_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      # UBAH: Baca password dari file .env
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      
+      # --- GOOGLE OAUTH (INJECT DARI .ENV) ---
+      # Backend akan bisa membaca ini lewat System.getenv() atau @Value
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+
+      # --- JPA ---
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      
+      # --- EMAIL CONFIG (Disarankan juga pakai .env) ---
+      SPRING_MAIL_HOST: smtp.gmail.com
+      SPRING_MAIL_PORT: 587
+      # UBAH: Baca dari .env agar email tidak bocor di GitHub
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD}
+      
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "true"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
+    depends_on:
+      - db
+
+  # 3. FRONTEND (Vue + Nginx)
+  frontend:
+    build: ./scheduler-frontend
+    container_name: scheduler_ui
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

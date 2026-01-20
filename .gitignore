@@ -1,0 +1,23 @@
+# --- Backend (Java/Maven) ---
+scheduler-api/target/
+scheduler-api/.mvn/
+scheduler-api/mvnw
+scheduler-api/mvnw.cmd
+scheduler-api/.classpath
+scheduler-api/.project
+scheduler-api/.settings/
+scheduler-api/.vscode/
+scheduler-api/*.log
+
+# --- Frontend (Node/Vue) ---
+scheduler-frontend/node_modules/
+scheduler-frontend/dist/
+scheduler-frontend/.env.local
+scheduler-frontend/.vscode/
+scheduler-frontend/*.log
+
+# --- System ---
+.DS_Store
+Thumbs.db
+*.pem
+.env
