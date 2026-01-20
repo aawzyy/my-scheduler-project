@@ -1,5 +1,5 @@
 # --- Backend (Java/Maven) ---
-scheduler-api/target/
+#scheduler-api/target/
 scheduler-api/.mvn/
 scheduler-api/mvnw
 scheduler-api/mvnw.cmd
