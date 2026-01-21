@@ -59,6 +59,20 @@ services:
       - "80:80"
     depends_on:
       - backend
+  
+  # 4. PORTAINER (Dashboard Monitoring)
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    ports:
+      - "9443:9443"
 
 volumes:
   postgres_data:
