@@ -187,7 +187,7 @@ const handleBooking = async () => {
 
       <div v-else class="max-w-[1400px] mx-auto p-6 md:p-10">
         <header class="flex flex-col md:flex-row justify-between items-center gap-6 mb-10 animate-in">
-            <div><h1 class="text-3xl font-black tracking-tight text-slate-800">Dashboard</h1><p class="text-slate-400 font-medium text-sm mt-1">Selamat datang kembali, Master jadwal.</p></div>
+            <div><h1 class="text-3xl font-black tracking-tight text-slate-800">Dashboard</h1><p class="text-slate-400 font-medium text-sm mt-1">Selamat datang kembali!</p></div>
             <div class="flex items-center gap-4 bg-white p-2 rounded-2xl shadow-sm border border-slate-100">
                <div v-if="syncStatus" class="flex items-center gap-2.5 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100"><span class="relative flex h-2.5 w-2.5"><span :class="syncStatus.isExpired ? 'bg-red-400' : 'bg-emerald-400'" class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"></span><span :class="syncStatus.isExpired ? 'bg-red-500' : 'bg-emerald-500'" class="relative inline-flex rounded-full h-2.5 w-2.5"></span></span><span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{{ syncStatus.isExpired ? 'Offline' : 'Live Sync' }}</span></div>
                <nav class="flex bg-slate-100/50 p-1 rounded-xl">

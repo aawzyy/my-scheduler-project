@@ -1,0 +1,41 @@
+name: Deploy to AWS Production
+
+on:
+  push:
+    branches:
+      - main  # Robot hanya bekerja kalau ada push ke branch 'main'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Deploy to Server via SSH
+      uses: appleboy/ssh-action@master # Ini robot peminjam tangan kita
+      with:
+        host: ${{ secrets.HOST_DNS }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22
+        script: |
+          # Perintah yang akan dijalankan Robot di dalam Server AWS:
+          
+          echo "🤖 Robot: Memulai proses deployment..."
+          
+          # 1. Masuk ke folder project
+          cd ~/my-scheduler-project
+          
+          # 2. Tarik kodingan terbaru (termasuk JAR & Dist)
+          git pull origin main
+          
+          # 3. Matikan & Nyalakan Docker (Build ulang container biar fresh)
+          echo "🤖 Robot: Restarting Docker Containers..."
+          sudo docker compose up -d --build --remove-orphans
+          
+          # 4. Bersihkan sampah image lama (biar disk server gak penuh)
+          sudo docker image prune -f
+          
+          echo "✅ Robot: Deployment Selesai! Cek website sekarang."
