@@ -27,8 +27,8 @@ public class AppointmentService {
 
     private final AppointmentRepository repository;
     private final DecisionLogRepository decisionLogRepository;
-    private final UserContactRepository contactRepository; // NEW: Akses ke Buku Telepon
-    private final AppConfigRepository configRepository;    // Akses ke Settings
+    private final UserContactRepository contactRepository; // Akses ke Buku Telepon
+    private final AppConfigRepository configRepository; // Akses ke Settings
 
     // Services
     private final PreferenceScoringService scoringService;
@@ -38,24 +38,24 @@ public class AppointmentService {
 
     @Transactional
     public Appointment createAppointment(Appointment appointment) {
-        
+
         // --- 1. HITUNG TIME SCORE (Faktor Waktu) ---
+        // Contoh: Jam 10 pagi = 50 poin. Jam 1 siang = 30 poin.
         int timeScore = scoringService.calculateScore(appointment.getStartTime().toLocalTime());
-        
+
         // --- 2. HITUNG RELATIONSHIP SCORE (Faktor Siapa) ---
         int relationshipBonus = 0;
-        String contactCategory = "UNKNOWN";
-        String contactName = "Guest";
-
+        String contactCategory = "UNKNOWN"; // Default orang asing
+        
         // Cek apakah email tamu ada di database kontak?
         Optional<UserContact> contactOpt = contactRepository.findByEmail(appointment.getRequesterEmail());
-        
+
         if (contactOpt.isPresent()) {
             UserContact contact = contactOpt.get();
             relationshipBonus = contact.getPriorityScore();
             contactCategory = contact.getCategory();
-            contactName = contact.getName();
-            System.out.println(">>> RELATIONSHIP DETECTED: " + contactName + " (" + contactCategory + ") Bonus: " + relationshipBonus);
+            
+            System.out.println(">>> RELATIONSHIP DETECTED: " + contact.getName() + " (" + contactCategory + ") Bonus: " + relationshipBonus);
         }
 
         // --- 3. KALKULASI SKOR AKHIR ---
@@ -63,111 +63,117 @@ public class AppointmentService {
 
         // Ambil Threshold Global dari Database (Default 85)
         int threshold = Integer.parseInt(
-            configRepository.findById("AUTO_ACCEPT_THRESHOLD")
-                .map(AppConfig::getConfigValue)
-                .orElse("85")
-        );
+                configRepository.findById("AUTO_ACCEPT_THRESHOLD")
+                        .map(AppConfig::getConfigValue)
+                        .orElse("85"));
 
-        // --- 4. LOGIKA PENGAMBILAN KEPUTUSAN ---
-        boolean isAutoAccepted = finalScore >= threshold;
+        // --- 4. LOGIKA PENGAMBILAN KEPUTUSAN (DECISION TREE) ---
         String decisionAction = "REQUESTED";
+        boolean isAutoAccepted = finalScore >= threshold;
 
-        // Safety Guard: Jika Blacklist, paksa tolak otomatis (atau set skor minus)
+        // [PERISAI BESI] Cek Blacklist DULUAN
         if ("BLACKLIST".equalsIgnoreCase(contactCategory)) {
-            isAutoAccepted = false;
-            finalScore = -999; 
-            System.out.println(">>> BLACKLIST BLOCKED: " + appointment.getRequesterEmail());
-        }
+            // A. Langsung Tolak (Tanpa Pending)
+            appointment.setStatus(AppointmentStatus.REJECTED);
+            decisionAction = "AUTO_REJECTED"; 
+            finalScore = -999; // Set skor hancur
 
-        if (isAutoAccepted) {
+            System.out.println(">>> BLACKLIST KICKED OUT: " + appointment.getRequesterEmail());
+
+            // B. Kirim Email Penolakan (Opsional, biar sopan dikit)
+             emailService.sendBookingStatus(
+                appointment.getRequesterEmail(), 
+                "Booking Status Update", 
+                appointment.getRequesterName(), 
+                "REJECTED", 
+                appointment.getStartTime().toString()
+            );
+
+        } else if (isAutoAccepted) {
+            // [JALUR VIP] Auto Accept jika Skor Cukup
             System.out.println(">>> AUTO-PILOT ACCEPTED: Final Score " + finalScore + " (Threshold " + threshold + ")");
-            
+
             try {
-                // A. Sync Google
+                // A. Sync ke Google Calendar
                 GoogleToken token = tokenRepository.findFirstByOrderByExpiresAtDesc()
-                    .orElseThrow(() -> new RuntimeException("Token Google tidak ditemukan"));
+                        .orElseThrow(() -> new RuntimeException("Token Google tidak ditemukan"));
                 String validToken = calendarService.getValidAccessToken(token);
                 calendarService.createEvent(validToken, appointment);
-                
-                // B. Update Status
+
+                // B. Update Status jadi ACCEPTED
                 appointment.setStatus(AppointmentStatus.ACCEPTED);
                 decisionAction = "AUTO_ACCEPTED";
 
-                // C. Email Notifikasi
+                // C. Email Notifikasi Sukses
                 String timeStr = appointment.getStartTime().toString().replace("T", " ");
-                String emailSubject = "⚡ Otomatis Diterima: " + appointment.getTitle();
-                
-                // Jika VIP, kasih subjek lebih sopan
+                String emailSubject = "Booking Confirmed: " + appointment.getTitle();
+
+                // Jika VIP, kasih subjek lebih spesial
                 if (relationshipBonus > 0) {
-                    emailSubject = "Priority Confirmed: " + appointment.getTitle();
+                    emailSubject = "Priority Confirmation: " + appointment.getTitle();
                 }
 
                 emailService.sendBookingStatus(
-                    appointment.getRequesterEmail(), 
-                    emailSubject,
-                    appointment.getRequesterName(), 
-                    "ACCEPTED", 
-                    timeStr
-                );
+                        appointment.getRequesterEmail(),
+                        emailSubject,
+                        appointment.getRequesterName(),
+                        "ACCEPTED",
+                        timeStr);
 
             } catch (Exception e) {
                 System.err.println(">>> GAGAL AUTO-SYNC: " + e.getMessage());
-                // Fallback ke manual jika error
+                // Fallback: Jika Google error, jangan tolak, tapi jadikan PENDING
                 appointment.setStatus(AppointmentStatus.PENDING);
-                isAutoAccepted = false;
                 decisionAction = "REQUESTED (SYNC_FAIL)";
             }
 
         } else {
-            // Skor tidak cukup -> Manual Review
+            // [RUANG TUNGGU] Skor tidak cukup -> Manual Review
             appointment.setStatus(AppointmentStatus.PENDING);
             decisionAction = "REQUESTED";
         }
 
-        // 5. Simpan ke Database
+        // 5. Simpan Status Akhir ke Database
         Appointment saved = repository.save(appointment);
 
-        // 6. Catat Log Memori (Penting untuk audit)
+        // 6. Catat ke Memori (Log)
         String timeLabel = appointment.getStartTime().toLocalTime() + " - " + appointment.getEndTime().toLocalTime();
         
-        // Kita simpan detail matematikanya di kolom 'guestName' atau field baru jika ada
-        // Format Log: "09:00 - 10:00 | Time: 30 + Rel: 60 (VIP)"
-        String logDetail = timeLabel + " | Time: " + timeScore + " + Rel: " + relationshipBonus + " (" + contactCategory + ")";
+        // Format Log: "10:00 - 11:00 | Time: 50 + Rel: 50 (VIP)"
+        String logReason = timeLabel + " | Time: " + timeScore + " + Rel: " + relationshipBonus + " (" + contactCategory + ")";
 
         DecisionLog log = new DecisionLog(
-            saved.getId(), 
-            decisionAction, 
-            finalScore, 
-            logDetail, // Simpan detail perhitungan di sini agar terlihat di DB
-            saved.getRequesterName()
+                saved.getId(),
+                decisionAction,
+                finalScore,
+                logReason, // Alasan detail
+                saved.getRequesterName() // Nama Tamu
         );
         decisionLogRepository.save(log);
 
         return saved;
     }
-    
-    // Method untuk log keputusan manual dari Dashboard Owner
+
+    // Method untuk log keputusan manual (Klik tombol Terima/Tolak di Dashboard)
     public void logDecision(Appointment app, String action, String reasonDetails) {
-        // Hitung ulang skor saat ini sebagai referensi snapshot
-        // (Kecuali action AUTO_ACCEPTED yang skornya sudah dihitung di flow utama, tapi tidak apa hitung lagi biar konsisten)
         int currentScore = 0;
         try {
             if (app.getStartTime() != null) {
                 currentScore = scoringService.calculateScore(app.getStartTime().toLocalTime());
             }
         } catch (Exception e) {
-            // Ignore error score calculation
+            // Ignore error score calculation for manual actions
         }
 
         DecisionLog log = new DecisionLog(
-            app.getId(), 
-            action, 
-            currentScore, 
-            app.getRequesterName(),
-            reasonDetails // Masukkan detail alasan ("Score: 85 (VIP Bonus)")
+                app.getId(),
+                action,
+                currentScore,
+                reasonDetails, // Alasan manual (misal: "Manual Approve")
+                app.getRequesterName()
         );
         decisionLogRepository.save(log);
-        
+
         System.out.println(">>> MEMORY LOGGED: " + action + " for " + app.getRequesterName());
     }
 
