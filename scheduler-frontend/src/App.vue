@@ -8,8 +8,8 @@ const isGuestMode = computed(() => currentPath.value.startsWith('/meet/'))
 const guestToken = computed(() => isGuestMode.value ? currentPath.value.split('/meet/')[1] || "" : "")
 
 // --- STATE KONTROL UI TAMU ---
-const isTokenExpired = ref(false)     // True jika Link Hangus/Expired
-const isBookingSuccess = ref(false)   // True jika Booking Berhasil
+const isTokenExpired = ref(false)
+const isBookingSuccess = ref(false)
 
 // --- STATE OWNER ---
 const isOwnerLoggedIn = ref(false)
@@ -19,6 +19,9 @@ const syncStatus = ref<any>(null)
 const generatedLink = ref<any>(null)
 const workSchedules = ref<any[]>([])
 const weekDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+
+// --- STATE MEMORY LOGS (BARU) ---
+const memoryLogs = ref<any[]>([])
 
 // --- STATE SETTINGS & CONTACTS ---
 const autoAcceptThreshold = ref(85)
@@ -58,6 +61,7 @@ onMounted(async () => {
     await loadWorkSchedules()
     await loadConfigs()
     await loadContacts()
+    await loadLogs() // <--- LOAD MEMORI SAAT AWAL
     
     pollingInterval = setInterval(async () => {
       if (isOwnerLoggedIn.value) {
@@ -67,7 +71,7 @@ onMounted(async () => {
       }
     }, 5000)
   } else {
-    // Mode Guest: Cek Validitas Token & Slot saat pertama load
+    // Mode Guest
     await handleCheckGuest()
   }
 })
@@ -76,55 +80,60 @@ onUnmounted(() => {
   if (pollingInterval) clearInterval(pollingInterval)
 })
 
-// --- LOGIC OWNER (Disingkat karena tidak berubah) ---
+// --- LOGIC OWNER ---
 const checkAuth = async () => { try { ownerBookings.value = await schedulerApi.getAppointments(); isOwnerLoggedIn.value = true; syncStatus.value = await schedulerApi.getDashboardStatus(); taskForm.value.requesterEmail = syncStatus.value?.email || '' } catch (e) { isOwnerLoggedIn.value = false } }
 const loginGoogle = () => window.location.href = '/oauth2/authorization/google'
+
 const loadConfigs = async () => { try { const configs = await schedulerApi.getAllConfigs(); const thresholdConfig = configs.find((c: any) => c.configKey === 'AUTO_ACCEPT_THRESHOLD'); if (thresholdConfig) autoAcceptThreshold.value = parseInt(thresholdConfig.configValue) } catch (e) { console.error("Gagal load config") } }
 const saveBrainConfig = async () => { isSavingConfig.value = true; try { await schedulerApi.updateConfig('AUTO_ACCEPT_THRESHOLD', autoAcceptThreshold.value.toString()); alert("Otak asisten berhasil di-update!") } catch (e) { alert("Gagal menyimpan") } finally { isSavingConfig.value = false } }
+
 const loadContacts = async () => { try { contacts.value = await schedulerApi.getContacts() } catch (e) { console.error("Gagal load kontak") } }
 const handleAddContact = async () => { isSavingContact.value = true; try { await schedulerApi.addContact(contactForm.value); await loadContacts(); contactForm.value = { email: '', name: '', category: 'VIP', priorityScore: 50 }; alert("Kontak tersimpan") } catch (e) { alert("Gagal") } finally { isSavingContact.value = false } }
 const handleDeleteContact = async (id: string) => { if(!confirm("Hapus?")) return; try { await schedulerApi.deleteContact(id); await loadContacts() } catch (e) { alert("Gagal hapus") } }
+
+// --- LOGIC MEMORY LOGS (BARU) ---
+const loadLogs = async () => {
+  try {
+    memoryLogs.value = await schedulerApi.getDecisionLogs()
+  } catch (e) {
+    console.error("Gagal load logs")
+  }
+}
+
 const loadWorkSchedules = async () => { try { const fromDb = await schedulerApi.getWorkSchedules(); workSchedules.value = weekDays.map(day => { const existing = fromDb.find((s: any) => s.dayOfWeek === day); return existing || { dayOfWeek: day, workingDay: false, startTime: '09:00:00', endTime: '17:00:00' } }) } catch (e) { console.error(e) } }
+
 const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
 const calendarGrid = computed(() => { const firstDay = new Date(currentYear.value, currentMonth.value, 1).getDay(); const daysInMonth = new Date(currentYear.value, currentMonth.value + 1, 0).getDate(); const padding = firstDay === 0 ? 6 : firstDay - 1; const days = []; for (let i = 0; i < padding; i++) days.push(null); for (let i = 1; i <= daysInMonth; i++) { const dateStr = `${currentYear.value}-${String(currentMonth.value + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`; days.push({ day: i, date: dateStr }) } return days })
 const nextMonth = () => { if (currentMonth.value === 11) { currentMonth.value = 0; currentYear.value++ } else { currentMonth.value++ } }
 const prevMonth = () => { if (currentMonth.value === 0) { currentMonth.value = 11; currentYear.value-- } else { currentMonth.value-- } }
 const hasAppointment = (dateStr: string) => { return ownerBookings.value.some(b => b.startTime && b.startTime.startsWith(dateStr) && b.status !== 'REJECTED') }
 const selectedDayAgenda = computed(() => { return ownerBookings.value.filter(b => b.startTime && b.startTime.startsWith(selectedDashboardDate.value)).sort((a, b) => a.startTime.localeCompare(b.startTime)) })
-const handleApprove = async (id: string) => { if(!confirm("Setujui?")) return; try { await schedulerApi.approveAppointment(id); await checkAuth() } catch (e) { alert("Gagal") } }
-const handleReject = async (id: string) => { if(!confirm("Tolak?")) return; try { await schedulerApi.rejectAppointment(id); await checkAuth() } catch (e) { alert("Gagal") } }
-const handleQuickTask = async () => { submitting.value = true; try { await schedulerApi.createQuickTask(taskForm.value); showTaskModal.value = false; await checkAuth() } catch (e) { alert("Gagal") } finally { submitting.value = false } }
+
+const handleApprove = async (id: string) => { if(!confirm("Setujui?")) return; try { await schedulerApi.approveAppointment(id); await checkAuth(); await loadLogs() } catch (e) { alert("Gagal") } }
+const handleReject = async (id: string) => { if(!confirm("Tolak?")) return; try { await schedulerApi.rejectAppointment(id); await checkAuth(); await loadLogs() } catch (e) { alert("Gagal") } }
+const handleQuickTask = async () => { submitting.value = true; try { await schedulerApi.createQuickTask(taskForm.value); showTaskModal.value = false; await checkAuth(); await loadLogs() } catch (e) { alert("Gagal") } finally { submitting.value = false } }
+
 const handleUpdateWorkDay = async (day: string) => { const data = workSchedules.value.find(s => s.dayOfWeek === day); if (!data) return; try { await schedulerApi.updateWorkSchedule(data) } catch (e) { alert("Gagal") } }
 const handleAddRoutine = async () => { try { const payload = { ...routineForm.value, startTime: routineForm.value.startTime + ":00", endTime: routineForm.value.endTime + ":00" }; await schedulerApi.addPersonalBlock(payload); showRoutineModal.value = false; syncStatus.value = await schedulerApi.getDashboardStatus() } catch (e) { alert("Gagal") } }
 const handleDeleteRoutine = async (id: number) => { if (!confirm("Hapus?")) return; try { await schedulerApi.deletePersonalBlock(id); syncStatus.value = await schedulerApi.getDashboardStatus() } catch (e) { alert("Gagal") } }
 const handleGenerateLink = async (type: 'WORK' | 'SOCIAL') => { try { generatedLink.value = await schedulerApi.generateShareLink(type) } catch (e) { alert("Gagal") } }
 const copyToClipboard = (text: string) => navigator.clipboard.writeText(text).then(() => alert("Copied!"))
 
-
 // ==========================================
-// LOGIC TAMU (GUEST) - BAGIAN KRUSIAL
+// LOGIC TAMU (GUEST)
 // ==========================================
-
 const handleCheckGuest = async () => {
   loading.value = true; 
   errorMsg.value = ''; 
   availableSlots.value = []
   
   try {
-    // 1. Cek Ketersediaan ke Backend
-    // Backend (AvailabilityController) akan memvalidasi token DULU.
-    // Jika token sudah USED (karena refresh halaman setelah booking), Backend lempar 403.
     const slots = await schedulerApi.checkGuestAvailability(guestToken.value, selectedDate.value)
-    
     if(slots.length === 0) errorMsg.value = "Tidak ada jadwal tersedia di tanggal ini."
     else availableSlots.value = slots
-
   } catch (e: any) { 
-    // 2. TANGKAP ERROR DARI BACKEND
-    // Jika Backend melempar 403 atau pesan error "Used/Expired"
     if (e.response && (e.response.status === 403 || e.response.status === 500)) {
         const msg = e.response.data || "";
-        // Jika karena token mati, kunci layar
         if (typeof msg === 'string' && (msg.includes("DIPAKAI") || msg.includes("KADALUARSA") || msg.includes("Expired") || msg.includes("tidak valid") || e.response.status === 403)) {
              isTokenExpired.value = true; 
         } else {
@@ -150,18 +159,9 @@ const handleBooking = async () => {
   try { 
     const payload = { ...form.value, shareToken: guestToken.value }
     await schedulerApi.createAppointment(payload); 
-    
     showModal.value = false; 
-    
-    // 3. SET STATUS SETELAH SUKSES
-    // Tampilkan layar "Sukses"
     isBookingSuccess.value = true; 
-    
-    // Tandai juga sebagai Expired secara internal
-    // Jadi jika user me-refresh browser, logic handleCheckGuest di atas akan berjalan
-    // dan Backend akan mengonfirmasi bahwa token sudah mati (403), lalu layar akan berubah jadi Expired.
     isTokenExpired.value = true; 
-    
   } catch (e: any) { 
     if(e.response && e.response.status === 403) {
         alert("Maaf! Link ini baru saja hangus/dipakai.")
@@ -191,7 +191,7 @@ const handleBooking = async () => {
             <div class="flex items-center gap-4 bg-white p-2 rounded-2xl shadow-sm border border-slate-100">
                <div v-if="syncStatus" class="flex items-center gap-2.5 px-4 py-2 bg-slate-50 rounded-xl border border-slate-100"><span class="relative flex h-2.5 w-2.5"><span :class="syncStatus.isExpired ? 'bg-red-400' : 'bg-emerald-400'" class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"></span><span :class="syncStatus.isExpired ? 'bg-red-500' : 'bg-emerald-500'" class="relative inline-flex rounded-full h-2.5 w-2.5"></span></span><span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{{ syncStatus.isExpired ? 'Offline' : 'Live Sync' }}</span></div>
                <nav class="flex bg-slate-100/50 p-1 rounded-xl">
-                  <button v-for="t in ['dashboard', 'routines', 'share', 'settings', 'contacts']" :key="t" @click="activeTab = t" :class="activeTab === t ? 'bg-white shadow-sm text-indigo-600 ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700'" class="px-5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide transition-all duration-300">{{ t }}</button>
+                  <button v-for="t in ['dashboard', 'routines', 'share', 'settings', 'contacts', 'logs']" :key="t" @click="activeTab = t" :class="activeTab === t ? 'bg-white shadow-sm text-indigo-600 ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700'" class="px-5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide transition-all duration-300">{{ t }}</button>
                </nav>
             </div>
         </header>
@@ -229,6 +229,7 @@ const handleBooking = async () => {
              <div class="lg:col-span-1 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm h-fit"><h2 class="text-xl font-black mb-6 text-slate-800">💼 Jam Kerja</h2><div v-if="workSchedules.length > 0" class="space-y-3"><div v-for="day in weekDays" :key="day" class="flex items-center justify-between p-3 rounded-2xl border border-transparent hover:border-slate-100"><div class="flex items-center gap-3"><input type="checkbox" :checked="workSchedules.find(s => s.dayOfWeek === day)?.workingDay" @change="(e:any) => { const s = workSchedules.find(x => x.dayOfWeek === day); if(s) { s.workingDay = e.target.checked; handleUpdateWorkDay(day); }}" class="h-5 w-5 accent-indigo-600"><span class="text-[11px] font-black uppercase tracking-widest text-slate-400 w-8">{{ day.substring(0,3) }}</span></div><div v-if="workSchedules.find(s => s.dayOfWeek === day)?.workingDay" class="flex items-center gap-1.5"><input type="time" v-model="workSchedules.find(s => s.dayOfWeek === day).startTime" @change="handleUpdateWorkDay(day)" class="bg-slate-100 p-1.5 rounded-lg text-[11px] font-bold w-16 text-center" /><span>-</span><input type="time" v-model="workSchedules.find(s => s.dayOfWeek === day).endTime" @change="handleUpdateWorkDay(day)" class="bg-slate-100 p-1.5 rounded-lg text-[11px] font-bold w-16 text-center" /></div></div></div></div>
              <div class="lg:col-span-2"><div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[400px]"><div class="flex justify-between items-center mb-6"><h2 class="text-xl font-black text-slate-800">⛔ Blokir Waktu</h2><button @click="showRoutineModal = true" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold">+ Baru</button></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div v-for="pb in syncStatus?.personalBlocks" :key="pb.id" class="bg-slate-50 p-6 rounded-[2rem] flex justify-between items-start"><div><div class="font-black text-slate-400 text-[10px] uppercase mb-2">{{ pb.name }}</div><div class="text-3xl font-black text-slate-800">{{ pb.startTime.substring(0,5) }} - {{ pb.endTime.substring(0,5) }}</div></div><button @click="handleDeleteRoutine(pb.id)" class="text-red-300 hover:text-red-500">✕</button></div></div></div></div>
         </div>
+
         <div v-if="activeTab === 'share'" class="grid md:grid-cols-2 gap-8 animate-in max-w-4xl mx-auto"><div v-for="mode in ['WORK', 'SOCIAL']" :key="mode" class="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center text-center"><h2 class="text-2xl font-black mb-2 text-slate-800">{{ mode }} Mode</h2><button @click="handleGenerateLink(mode as any)" class="w-full bg-slate-50 text-slate-900 py-4 rounded-2xl font-black hover:bg-indigo-600 hover:text-white transition-all mt-4">Generate Link</button></div><div v-if="generatedLink" class="col-span-full bg-indigo-600 p-8 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center text-white font-mono text-sm">{{ generatedLink.shareLink }} <button @click="copyToClipboard(generatedLink.shareLink)" class="bg-white text-indigo-600 px-4 py-2 rounded-xl font-black text-xs">Copy</button></div></div>
 
         <div v-if="activeTab === 'settings'" class="animate-in max-w-2xl mx-auto">
@@ -269,6 +270,45 @@ const handleBooking = async () => {
                     </div>
                 </div>
                 <div v-else class="text-center py-20 text-slate-300"><div class="text-4xl mb-2 grayscale opacity-50">📇</div><p class="text-sm font-bold">Belum ada kontak.</p></div>
+             </div>
+        </div>
+
+        <div v-if="activeTab === 'logs'" class="animate-in max-w-5xl mx-auto">
+             <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[500px]">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-black text-slate-800">🧠 Memori Asisten</h2>
+                    <button @click="loadLogs" class="text-xs font-bold text-indigo-600 hover:text-indigo-800">Refresh</button>
+                </div>
+                
+                <div class="overflow-hidden rounded-2xl border border-slate-100">
+                    <table class="w-full text-left text-sm text-slate-600">
+                        <thead class="bg-slate-50 text-xs uppercase font-black text-slate-400">
+                            <tr>
+                                <th class="px-6 py-4">Waktu</th>
+                                <th class="px-6 py-4">Action</th>
+                                <th class="px-6 py-4">Tamu</th>
+                                <th class="px-6 py-4">Alasan / Detail</th>
+                                <th class="px-6 py-4 text-center">Skor</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <tr v-for="log in memoryLogs" :key="log.id" class="hover:bg-slate-50/50 transition-colors">
+                                <td class="px-6 py-4 font-mono text-xs">{{ new Date(log.timestamp).toLocaleString() }}</td>
+                                <td class="px-6 py-4">
+                                    <span v-if="log.action === 'AUTO_ACCEPTED'" class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-md text-[10px] font-black uppercase">Auto Accept</span>
+                                    <span v-else-if="log.action === 'APPROVED'" class="bg-blue-100 text-blue-700 px-2 py-1 rounded-md text-[10px] font-black uppercase">Manual Approve</span>
+                                    <span v-else-if="log.action === 'REJECTED'" class="bg-red-100 text-red-700 px-2 py-1 rounded-md text-[10px] font-black uppercase">Rejected</span>
+                                    <span v-else class="bg-slate-100 text-slate-700 px-2 py-1 rounded-md text-[10px] font-black uppercase">{{ log.action }}</span>
+                                </td>
+                                <td class="px-6 py-4 font-bold text-slate-800">{{ log.guestName }}</td>
+                                <td class="px-6 py-4 text-xs">{{ log.reason || '-' }}</td>
+                                <td class="px-6 py-4 text-center font-mono font-bold" :class="log.scoreSnapshot >= 85 ? 'text-emerald-600' : 'text-slate-400'">
+                                    {{ log.scoreSnapshot }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
              </div>
         </div>
 

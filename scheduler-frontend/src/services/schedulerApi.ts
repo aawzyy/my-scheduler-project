@@ -105,5 +105,10 @@ export default {
 
   async deleteContact(id: string) {
     return apiClient.delete(`/contacts/${id}`)
+  },
+
+  async getDecisionLogs() {
+    const response = await apiClient.get('/logs')
+    return response.data
   }
 }
