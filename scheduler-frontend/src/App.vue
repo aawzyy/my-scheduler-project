@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import schedulerApi, { type TimeSlot, type UserContact } from './services/schedulerApi'
+import ApprovalInbox from './components/ApprovalInbox.vue'
 
 // --- STATE UMUM ---
 const currentPath = ref(window.location.pathname)
@@ -194,7 +195,12 @@ const handleBooking = async () => {
                   <button v-for="t in ['dashboard', 'routines', 'share', 'settings', 'contacts', 'logs']" :key="t" @click="activeTab = t" :class="activeTab === t ? 'bg-white shadow-sm text-indigo-600 ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700'" class="px-5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide transition-all duration-300">{{ t }}</button>
                </nav>
             </div>
-        </header>
+        </header> 
+        <ApprovalInbox 
+          :bookings="ownerBookings" 
+          @approve="handleApprove" 
+          @reject="handleReject" 
+       />
 
         <div v-if="activeTab === 'dashboard'" class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in">
             <div class="lg:col-span-7 bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm h-fit">
