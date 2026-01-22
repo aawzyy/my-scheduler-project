@@ -147,19 +147,28 @@ public class AppointmentService {
     }
     
     // Method untuk log keputusan manual dari Dashboard Owner
-    public void logDecision(Appointment app, String action) {
-        // Hitung ulang skor saat ini sebagai referensi
-        int timeScore = scoringService.calculateScore(app.getStartTime().toLocalTime());
-        String timeLabel = app.getStartTime().toLocalTime() + " - " + app.getEndTime().toLocalTime();
+    public void logDecision(Appointment app, String action, String reasonDetails) {
+        // Hitung ulang skor saat ini sebagai referensi snapshot
+        // (Kecuali action AUTO_ACCEPTED yang skornya sudah dihitung di flow utama, tapi tidak apa hitung lagi biar konsisten)
+        int currentScore = 0;
+        try {
+            if (app.getStartTime() != null) {
+                currentScore = scoringService.calculateScore(app.getStartTime().toLocalTime());
+            }
+        } catch (Exception e) {
+            // Ignore error score calculation
+        }
 
         DecisionLog log = new DecisionLog(
             app.getId(), 
             action, 
-            timeScore, // Manual decision biasanya hanya melihat time score context
-            timeLabel + " (Manual Decision)", 
-            app.getRequesterName()
+            currentScore, 
+            app.getRequesterName(),
+            reasonDetails // Masukkan detail alasan ("Score: 85 (VIP Bonus)")
         );
         decisionLogRepository.save(log);
+        
+        System.out.println(">>> MEMORY LOGGED: " + action + " for " + app.getRequesterName());
     }
 
     public List<Appointment> findAll() {

@@ -49,8 +49,9 @@ public class AppointmentController {
 
     // --- 1. FIX: ENDPOINT BOOKING (TAMU) ---
     @PostMapping("/appointments")
-    public ResponseEntity<?> createBooking(@RequestBody AppointmentRequest request) { // Return pakai ? agar bisa kirim Error String
-        
+    public ResponseEntity<?> createBooking(@RequestBody AppointmentRequest request) { // Return pakai ? agar bisa kirim
+                                                                                      // Error String
+
         // --- [LANGKAH 1: SATPAM] VALIDASI TOKEN DULU ---
         // Sebelum membuat appointment, pastikan token valid dan BELUM DIPAKAI.
         if (request.getShareToken() != null && !request.getShareToken().isEmpty()) {
@@ -69,7 +70,7 @@ public class AppointmentController {
         appointment.setDescription(request.getDescription());
         appointment.setRequesterName(request.getRequesterName());
         appointment.setRequesterEmail(request.getRequesterEmail());
-        appointment.setStartTime(request.getStartTime()); 
+        appointment.setStartTime(request.getStartTime());
         appointment.setEndTime(request.getEndTime());
 
         Appointment saved = service.createAppointment(appointment);
@@ -93,7 +94,7 @@ public class AppointmentController {
     @PostMapping("/appointments/{id}/approve")
     public ResponseEntity<?> approveAppointment(@PathVariable UUID id) {
         Appointment appointment = service.findById(id);
-        
+
         try {
             // A. Ambil Token Valid untuk Sync ke Google
             GoogleToken token = tokenRepository.findFirstByOrderByExpiresAtDesc()
@@ -102,23 +103,22 @@ public class AppointmentController {
 
             // B. Push ke Google Calendar
             calendarService.createEvent(validToken, appointment);
-            
+
             // C. Update Status DB Lokal
             appointment.setStatus(AppointmentStatus.ACCEPTED);
             service.save(appointment);
-            
+
             // D. MEMORY LAYER: Catat Keputusan
-            service.logDecision(appointment, "APPROVED");
+            service.logDecision(appointment, "APPROVED", "Manual approval by Owner via Dashboard");
 
             // E. Kirim Email Notifikasi
             String timeStr = appointment.getStartTime().toString().replace("T", " ");
             emailService.sendBookingStatus(
-                appointment.getRequesterEmail(), 
-                "Pertemuan Dikonfirmasi: " + appointment.getTitle(),
-                appointment.getRequesterName(),
-                "ACCEPTED",
-                timeStr
-            );
+                    appointment.getRequesterEmail(),
+                    "Pertemuan Dikonfirmasi: " + appointment.getTitle(),
+                    appointment.getRequesterName(),
+                    "ACCEPTED",
+                    timeStr);
 
             return ResponseEntity.ok(Map.of("message", "Approved & Synced"));
 
@@ -132,23 +132,23 @@ public class AppointmentController {
     @PostMapping("/appointments/{id}/reject")
     public ResponseEntity<?> rejectAppointment(@PathVariable UUID id) {
         Appointment appointment = service.findById(id);
-        
+
         // A. Update Status DB Lokal
         appointment.setStatus(AppointmentStatus.REJECTED);
         service.save(appointment);
 
         // B. MEMORY LAYER: Catat Keputusan
-        service.logDecision(appointment, "REJECTED");
+        // service.logDecision(appointment, "REJECTED"); <-- HAPUS YANG LAMA
+        service.logDecision(appointment, "REJECTED", "Manual rejection by Owner via Dashboard"); // GANTI BARU
 
         // C. Kirim Email Notifikasi
         String timeStr = appointment.getStartTime().toString().replace("T", " ");
         emailService.sendBookingStatus(
-            appointment.getRequesterEmail(), 
-            "Pertemuan Ditolak: " + appointment.getTitle(),
-            appointment.getRequesterName(),
-            "REJECTED",
-            timeStr
-        );
+                appointment.getRequesterEmail(),
+                "Pertemuan Ditolak: " + appointment.getTitle(),
+                appointment.getRequesterName(),
+                "REJECTED",
+                timeStr);
 
         return ResponseEntity.ok(Map.of("message", "Booking ditolak."));
     }
@@ -169,23 +169,24 @@ public class AppointmentController {
             task.setDescription("Quick Task");
             task.setRequesterName("Owner");
             task.setRequesterEmail(request.getRequesterEmail()); // Email owner
-            
+
             // FIX: Langsung assign tanpa parse
             task.setStartTime(request.getStartTime());
             task.setEndTime(request.getEndTime());
 
             // B. Simpan ke Database (Akan masuk log REQUESTED via service)
             Appointment savedTask = service.createAppointment(task);
-            
+
             // C. Langsung Accept
             savedTask.setStatus(AppointmentStatus.ACCEPTED);
             service.save(savedTask);
 
             // D. Sync ke Google Calendar
             calendarService.createEvent(validToken, savedTask);
-            
+
             // E. Log Decision (Auto Approved)
-            service.logDecision(savedTask, "AUTO-CREATED");
+            // service.logDecision(savedTask, "AUTO-CREATED"); <-- HAPUS YANG LAMA
+            service.logDecision(savedTask, "AUTO_ACCEPTED", "Quick Task created by Owner"); // GANTI BARU
 
             return ResponseEntity.ok(Map.of("message", "Quick Task Berhasil Disinkronkan!"));
 
@@ -249,13 +250,14 @@ public class AppointmentController {
 
                 boolean isDuplicate = localApps.stream().anyMatch(local -> {
                     // Cek hanya yang statusnya ACCEPTED
-                    if (local.getStatus() != AppointmentStatus.ACCEPTED) return false;
+                    if (local.getStatus() != AppointmentStatus.ACCEPTED)
+                        return false;
 
                     String localStart = local.getStartTime().toString();
-                    
+
                     // Bandingkan Judul & Waktu Mulai (Ignore Case)
-                    return gTitle != null && local.getTitle().equalsIgnoreCase(gTitle) && 
-                           localStart.startsWith(gStart);
+                    return gTitle != null && local.getTitle().equalsIgnoreCase(gTitle) &&
+                            localStart.startsWith(gStart);
                 });
 
                 if (!isDuplicate) {
@@ -264,7 +266,7 @@ public class AppointmentController {
             }
 
             return ResponseEntity.ok(combined);
-            
+
         } catch (Exception e) {
             return ResponseEntity.ok(new ArrayList<>());
         }
