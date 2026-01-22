@@ -39,117 +39,111 @@ public class AppointmentService {
     @Transactional
     public Appointment createAppointment(Appointment appointment) {
 
-        // --- 1. HITUNG TIME SCORE (Faktor Waktu) ---
-        // Contoh: Jam 10 pagi = 50 poin. Jam 1 siang = 30 poin.
+        // --- 1. HITUNG TIME SCORE ---
         int timeScore = scoringService.calculateScore(appointment.getStartTime().toLocalTime());
 
-        // --- 2. HITUNG RELATIONSHIP SCORE (Faktor Siapa) ---
+        // --- 2. HITUNG RELATIONSHIP SCORE ---
         int relationshipBonus = 0;
-        String contactCategory = "UNKNOWN"; // Default orang asing
+        String contactCategory = "UNKNOWN";
         
-        // Cek apakah email tamu ada di database kontak?
         Optional<UserContact> contactOpt = contactRepository.findByEmail(appointment.getRequesterEmail());
 
         if (contactOpt.isPresent()) {
             UserContact contact = contactOpt.get();
             relationshipBonus = contact.getPriorityScore();
             contactCategory = contact.getCategory();
-            
-            System.out.println(">>> RELATIONSHIP DETECTED: " + contact.getName() + " (" + contactCategory + ") Bonus: " + relationshipBonus);
         }
 
-        // --- 3. KALKULASI SKOR AKHIR ---
+        // --- 3. KALKULASI SKOR ---
         int finalScore = timeScore + relationshipBonus;
+        int threshold = Integer.parseInt(configRepository.findById("AUTO_ACCEPT_THRESHOLD")
+                        .map(AppConfig::getConfigValue).orElse("85"));
 
-        // Ambil Threshold Global dari Database (Default 85)
-        int threshold = Integer.parseInt(
-                configRepository.findById("AUTO_ACCEPT_THRESHOLD")
-                        .map(AppConfig::getConfigValue)
-                        .orElse("85"));
-
-        // --- 4. LOGIKA PENGAMBILAN KEPUTUSAN (DECISION TREE) ---
+        // --- 4. KEPUTUSAN (DECISION TREE) ---
         String decisionAction = "REQUESTED";
         boolean isAutoAccepted = finalScore >= threshold;
 
-        // [PERISAI BESI] Cek Blacklist DULUAN
+        // [LOGIKA BLACKLIST - ANTI CRASH]
         if ("BLACKLIST".equalsIgnoreCase(contactCategory)) {
-            // A. Langsung Tolak (Tanpa Pending)
+            // A. Set Status REJECTED
             appointment.setStatus(AppointmentStatus.REJECTED);
             decisionAction = "AUTO_REJECTED"; 
-            finalScore = -999; // Set skor hancur
+            finalScore = -999; 
+            
+            System.out.println(">>> BLACKLIST BLOCKED: " + appointment.getRequesterEmail());
 
-            System.out.println(">>> BLACKLIST KICKED OUT: " + appointment.getRequesterEmail());
-
-            // B. Kirim Email Penolakan (Opsional, biar sopan dikit)
-             emailService.sendBookingStatus(
-                appointment.getRequesterEmail(), 
-                "Booking Status Update", 
-                appointment.getRequesterName(), 
-                "REJECTED", 
-                appointment.getStartTime().toString()
-            );
+            // B. Coba Kirim Email (Dengan Jaring Pengaman)
+            try {
+                 emailService.sendBookingStatus(
+                    appointment.getRequesterEmail(), 
+                    "Booking Declined", 
+                    appointment.getRequesterName(), 
+                    "REJECTED", 
+                    appointment.getStartTime().toString()
+                );
+            } catch (Exception e) {
+                // Kalau email gagal, CUEKIN SAJA. Jangan bikin server crash.
+                System.err.println(">>> Gagal kirim email reject (Mungkin email palsu): " + e.getMessage());
+            }
 
         } else if (isAutoAccepted) {
-            // [JALUR VIP] Auto Accept jika Skor Cukup
-            System.out.println(">>> AUTO-PILOT ACCEPTED: Final Score " + finalScore + " (Threshold " + threshold + ")");
-
+            // [LOGIKA AUTO ACCEPT]
+            System.out.println(">>> AUTO-PILOT ACCEPTED...");
             try {
-                // A. Sync ke Google Calendar
                 GoogleToken token = tokenRepository.findFirstByOrderByExpiresAtDesc()
                         .orElseThrow(() -> new RuntimeException("Token Google tidak ditemukan"));
                 String validToken = calendarService.getValidAccessToken(token);
                 calendarService.createEvent(validToken, appointment);
 
-                // B. Update Status jadi ACCEPTED
                 appointment.setStatus(AppointmentStatus.ACCEPTED);
                 decisionAction = "AUTO_ACCEPTED";
 
-                // C. Email Notifikasi Sukses
-                String timeStr = appointment.getStartTime().toString().replace("T", " ");
-                String emailSubject = "Booking Confirmed: " + appointment.getTitle();
-
-                // Jika VIP, kasih subjek lebih spesial
-                if (relationshipBonus > 0) {
-                    emailSubject = "Priority Confirmation: " + appointment.getTitle();
+                String emailSubject = (relationshipBonus > 0) ? "Priority Confirmed!" : "Booking Confirmed";
+                
+                // Email juga dibungkus try-catch biar aman
+                try {
+                    emailService.sendBookingStatus(
+                        appointment.getRequesterEmail(), 
+                        emailSubject,
+                        appointment.getRequesterName(), 
+                        "ACCEPTED", 
+                        appointment.getStartTime().toString().replace("T", " ")
+                    );
+                } catch (Exception e) {
+                    System.err.println(">>> Email sukses gagal dikirim: " + e.getMessage());
                 }
 
-                emailService.sendBookingStatus(
-                        appointment.getRequesterEmail(),
-                        emailSubject,
-                        appointment.getRequesterName(),
-                        "ACCEPTED",
-                        timeStr);
-
             } catch (Exception e) {
-                System.err.println(">>> GAGAL AUTO-SYNC: " + e.getMessage());
-                // Fallback: Jika Google error, jangan tolak, tapi jadikan PENDING
                 appointment.setStatus(AppointmentStatus.PENDING);
                 decisionAction = "REQUESTED (SYNC_FAIL)";
+                System.err.println(">>> Sync Google Gagal: " + e.getMessage());
             }
 
         } else {
-            // [RUANG TUNGGU] Skor tidak cukup -> Manual Review
+            // [LOGIKA MANUAL]
             appointment.setStatus(AppointmentStatus.PENDING);
             decisionAction = "REQUESTED";
         }
 
-        // 5. Simpan Status Akhir ke Database
+        // 5. Simpan ke Database
         Appointment saved = repository.save(appointment);
 
-        // 6. Catat ke Memori (Log)
-        String timeLabel = appointment.getStartTime().toLocalTime() + " - " + appointment.getEndTime().toLocalTime();
-        
-        // Format Log: "10:00 - 11:00 | Time: 50 + Rel: 50 (VIP)"
-        String logReason = timeLabel + " | Time: " + timeScore + " + Rel: " + relationshipBonus + " (" + contactCategory + ")";
-
-        DecisionLog log = new DecisionLog(
-                saved.getId(),
-                decisionAction,
-                finalScore,
-                logReason, // Alasan detail
-                saved.getRequesterName() // Nama Tamu
-        );
-        decisionLogRepository.save(log);
+        // 6. Catat Log
+        try {
+            String timeLabel = appointment.getStartTime().toLocalTime() + " - " + appointment.getEndTime().toLocalTime();
+            String logReason = timeLabel + " | Time: " + timeScore + " + Rel: " + relationshipBonus + " (" + contactCategory + ")";
+    
+            DecisionLog log = new DecisionLog(
+                    saved.getId(),
+                    decisionAction,
+                    finalScore,
+                    logReason,
+                    saved.getRequesterName()
+            );
+            decisionLogRepository.save(log);
+        } catch (Exception e) {
+            System.err.println(">>> Gagal simpan log (Non-fatal): " + e.getMessage());
+        }
 
         return saved;
     }
