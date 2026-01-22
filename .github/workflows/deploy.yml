@@ -21,21 +21,23 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         port: 22
         script: |
-          # Perintah yang akan dijalankan Robot di dalam Server AWS:
-          
           echo "🤖 Robot: Memulai proses deployment..."
           
           # 1. Masuk ke folder project
           cd ~/my-scheduler-project
           
-          # 2. Tarik kodingan terbaru (termasuk JAR & Dist)
+          # 2. Tarik kodingan terbaru
           git pull origin main
+
+          # [BARU] 3. Buat file credentials.json dari GitHub Secrets
+          # Robot menulis isi rahasia ke dalam file di server
+          echo '${{ secrets.GDRIVE_CREDENTIALS }}' > backup_service/credentials.json
           
-          # 3. Matikan & Nyalakan Docker (Build ulang container biar fresh)
+          # 4. Matikan & Nyalakan Docker
           echo "🤖 Robot: Restarting Docker Containers..."
           sudo docker compose up -d --build --remove-orphans
           
-          # 4. Bersihkan sampah image lama (biar disk server gak penuh)
+          # 5. Bersihkan sampah
           sudo docker image prune -f
           
-          echo "✅ Robot: Deployment Selesai! Cek website sekarang."
+          echo "✅ Robot: Deployment Selesai!"

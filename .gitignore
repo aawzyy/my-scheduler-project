@@ -21,3 +21,5 @@ scheduler-frontend/*.log
 Thumbs.db
 *.pem
 .env
+
+backup_service/credentials.json

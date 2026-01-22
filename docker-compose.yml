@@ -73,6 +73,20 @@ services:
       - portainer_data:/data
     ports:
       - "8443:9443"
+  
+  # 5. BACKUP WORKER (Robot Google Drive)
+  backup_worker:
+    build: ./backup_service
+    container_name: scheduler_backup
+    restart: always
+    environment:
+      # Menggunakan password dari .env agar bisa akses DB
+      PGPASSWORD: ${DB_PASSWORD}
+    depends_on:
+      - db
+    volumes:
+      # Sync waktu server agar jam 02:00 nya akurat
+      - /etc/localtime:/etc/localtime:ro
 
 volumes:
   postgres_data:
