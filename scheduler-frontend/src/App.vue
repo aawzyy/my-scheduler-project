@@ -196,13 +196,14 @@ const handleBooking = async () => {
                </nav>
             </div>
         </header> 
-        <ApprovalInbox 
+        
+
+        <div v-if="activeTab === 'dashboard'" class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in">
+          <ApprovalInbox 
           :bookings="ownerBookings" 
           @approve="handleApprove" 
           @reject="handleReject" 
        />
-
-        <div v-if="activeTab === 'dashboard'" class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in">
             <div class="lg:col-span-7 bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm h-fit">
                <div class="flex justify-between items-end mb-6">
                   <div><h2 class="text-2xl font-black text-slate-800">{{ monthNames[currentMonth] }}</h2><p class="text-slate-400 font-bold text-sm">{{ currentYear }}</p></div>
