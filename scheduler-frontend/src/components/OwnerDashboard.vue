@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import schedulerApi, { type UserContact } from '../services/schedulerApi'
-import ApprovalInbox from './ApprovalInbox.vue' // Pastikan file ini ada dari step sebelumnya
+import ApprovalInbox from './ApprovalInbox.vue'
 
 // State Owner
 const activeTab = ref('dashboard')
@@ -45,7 +45,6 @@ const loadAllData = async () => {
         syncStatus.value = await schedulerApi.getDashboardStatus()
         taskForm.value.requesterEmail = syncStatus.value?.email || ''
         workSchedules.value = (await schedulerApi.getWorkSchedules()) || []
-        // Fill missing days
         weekDays.forEach(day => { if(!workSchedules.value.find((s: any) => s.dayOfWeek === day)) workSchedules.value.push({ dayOfWeek: day, workingDay: false, startTime: '09:00:00', endTime: '17:00:00' }) })
         
         const configs = await schedulerApi.getAllConfigs(); 
@@ -110,7 +109,6 @@ const loadLogs = async () => { memoryLogs.value = await schedulerApi.getDecision
                         <div class="flex justify-between items-start mb-2"><span class="text-[10px] font-black px-2 py-1 rounded-md bg-indigo-50 text-indigo-600">{{ agenda.startTime.split('T')[1].substring(0,5) }} - {{ agenda.endTime.split('T')[1].substring(0,5) }}</span>
                         <div v-if="agenda.status === 'GOOGLE'"><img src="https://www.svgrepo.com/show/355037/google-icon.svg" class="w-3.5 h-3.5 opacity-70"></div><div v-else-if="agenda.status === 'ACCEPTED'"><span class="text-emerald-500 text-[10px] font-bold">● Synced</span></div><div v-else-if="agenda.status === 'PENDING'"><span class="text-amber-500 text-[10px] font-bold">● Menunggu</span></div><div v-else-if="agenda.status === 'REJECTED'"><span class="text-red-400 text-[10px] font-bold line-through">Ditolak</span></div></div>
                         <h3 class="font-bold text-slate-800 text-sm leading-snug mb-1">{{ agenda.title }}</h3><p v-if="agenda.status !== 'GOOGLE'" class="text-[10px] text-slate-400 font-medium">Oleh: {{ agenda.requesterName }}</p>
-                        <div v-if="agenda.status === 'PENDING'" class="mt-3 flex gap-2 pt-3 border-t border-slate-50"><button @click="handleReject(agenda.id)" class="flex-1 bg-white border border-red-100 text-red-500 py-1.5 rounded-lg text-[10px] font-bold">Tolak</button><button @click="handleApprove(agenda.id)" class="flex-1 bg-indigo-600 text-white py-1.5 rounded-lg text-[10px] font-bold">Terima</button></div>
                     </div>
                 </div>
                 <div v-else class="flex flex-col items-center justify-center h-48 text-slate-300"><div class="text-4xl mb-2 grayscale opacity-50">☕</div><div class="text-xs font-bold text-slate-400">Kosong.</div></div>
