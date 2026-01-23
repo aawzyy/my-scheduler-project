@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-// Terima data booking dari App.vue
+// Terima data dari App.vue
 const props = defineProps<{
   bookings: any[]
 }>()
 
-// Kirim sinyal ke App.vue kalau tombol ditekan
 const emit = defineEmits(['approve', 'reject'])
 
-// Filter hanya yang statusnya PENDING
+// Filter hanya yang PENDING & Urutkan berdasarkan waktu
 const pendingRequests = computed(() => {
   return props.bookings
     .filter(b => b.status === 'PENDING')
@@ -18,34 +17,61 @@ const pendingRequests = computed(() => {
 </script>
 
 <template>
-  <div v-if="pendingRequests.length > 0" class="bg-amber-50 rounded-[2rem] p-6 border border-amber-100 shadow-sm relative overflow-hidden mb-6 animate-in">
-    <div class="absolute top-0 right-0 p-4 opacity-10 text-amber-600"><span class="text-9xl">🔔</span></div>
-    <div class="relative z-10">
-        <h2 class="text-lg font-black text-amber-800 flex items-center gap-2">
-            <span>🔔</span> Butuh Persetujuan ({{ pendingRequests.length }})
-        </h2>
-        <p class="text-xs font-medium text-amber-600/80 mb-4">Ada tamu yang menunggu konfirmasi Anda.</p>
+  <div v-if="pendingRequests.length > 0" class="bg-amber-50/80 backdrop-blur-sm rounded-[2rem] p-6 border border-amber-100 shadow-sm relative mb-6">
+    
+    <div class="flex justify-between items-end mb-4 relative z-10">
+        <div>
+            <h2 class="text-lg font-black text-amber-900 flex items-center gap-2">
+                <span>🔔</span> Inbox ({{ pendingRequests.length }})
+            </h2>
+            <p class="text-[11px] font-bold text-amber-600/70 uppercase tracking-wider mt-1">Geser untuk melihat →</p>
+        </div>
+        <div class="absolute -top-6 -right-6 text-9xl opacity-5 text-amber-500 pointer-events-none">📬</div>
+    </div>
+
+    <div class="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 px-1 scrollbar-hide">
         
-        <div class="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-            <div v-for="req in pendingRequests" :key="req.id" class="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-1 rounded-md uppercase tracking-wider">
-                            📅 {{ new Date(req.startTime).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) }}
-                        </span>
-                        <span class="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-1 rounded-md uppercase tracking-wider">
-                            ⏰ {{ req.startTime.split('T')[1].substring(0,5) }}
-                        </span>
-                    </div>
-                    <h3 class="font-bold text-slate-800 text-sm">{{ req.title }}</h3>
-                    <p class="text-xs text-slate-500">Oleh: <span class="font-bold">{{ req.requesterName }}</span></p>
+        <div v-for="req in pendingRequests" :key="req.id" 
+             class="min-w-[280px] w-[85%] sm:w-[320px] bg-white p-5 rounded-3xl border border-amber-100 shadow-sm snap-center flex flex-col justify-between group hover:border-amber-300 transition-all">
+            
+            <div class="mb-4">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-1 rounded-lg uppercase tracking-wider">
+                        📅 {{ new Date(req.startTime).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) }}
+                    </span>
+                    <span class="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-1 rounded-lg uppercase tracking-wider">
+                        ⏰ {{ req.startTime.split('T')[1].substring(0,5) }}
+                    </span>
                 </div>
-                <div class="flex gap-2 w-full sm:w-auto">
-                    <button @click="$emit('reject', req.id)" class="flex-1 sm:flex-none px-4 py-2 rounded-xl border border-red-100 text-red-500 text-xs font-bold hover:bg-red-50 transition-colors">Tolak</button>
-                    <button @click="$emit('approve', req.id)" class="flex-1 sm:flex-none px-6 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors">Terima</button>
-                </div>
+                <h3 class="font-black text-slate-800 text-base leading-tight mb-1">{{ req.title }}</h3>
+                <p class="text-xs text-slate-400 font-medium">Oleh: <span class="text-slate-600 font-bold">{{ req.requesterName }}</span></p>
+            </div>
+
+            <div class="flex gap-2 mt-auto">
+                <button 
+                    @click="$emit('reject', req.id)" 
+                    class="flex-1 px-3 py-3 rounded-xl border border-red-50 text-red-400 text-xs font-black hover:bg-red-50 hover:text-red-600 transition-colors">
+                    Tolak
+                </button>
+                <button 
+                    @click="$emit('approve', req.id)" 
+                    class="flex-1 px-3 py-3 rounded-xl bg-slate-900 text-white text-xs font-black shadow-lg shadow-slate-200 hover:bg-indigo-600 transition-all transform active:scale-95">
+                    Terima
+                </button>
             </div>
         </div>
+
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Sembunyikan scrollbar agar terlihat bersih seperti aplikasi mobile native */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+</style>
