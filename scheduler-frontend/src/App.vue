@@ -199,12 +199,12 @@ const handleBooking = async () => {
         
 
         <div v-if="activeTab === 'dashboard'" class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in">
-          <ApprovalInbox 
+            <div class="lg:col-span-7 bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm h-fit">
+              <ApprovalInbox 
           :bookings="ownerBookings" 
           @approve="handleApprove" 
           @reject="handleReject" 
        />
-            <div class="lg:col-span-7 bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm h-fit">
                <div class="flex justify-between items-end mb-6">
                   <div><h2 class="text-2xl font-black text-slate-800">{{ monthNames[currentMonth] }}</h2><p class="text-slate-400 font-bold text-sm">{{ currentYear }}</p></div>
                   <div class="flex gap-2"><button @click="prevMonth" class="w-8 h-8 flex items-center justify-center rounded-full border border-slate-100 hover:bg-slate-50">←</button><button @click="nextMonth" class="w-8 h-8 flex items-center justify-center rounded-full border border-slate-100 hover:bg-slate-50">→</button></div>
