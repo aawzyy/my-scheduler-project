@@ -43,74 +43,74 @@ public class MobileAuthController {
         String idTokenString = payload.get("idToken");
         String accessToken = payload.get("accessToken"); 
 
-        if (idTokenString == null) {
-            System.out.println(">>> [ERROR] Token Mobile Kosong!");
+        if (idTokenString == null || idTokenString.isEmpty()) {
             return ResponseEntity.badRequest().body("Token Kosong");
         }
 
-        System.out.println(">>> [2] ID Token diterima (panjang: " + idTokenString.length() + ")");
-
         try {
-            System.out.println(">>> [3] Memulai Verifikasi ke Google Server...");
+            System.out.println(">>> [2] Mencoba Parse Token...");
             
-            // Verifier
+            // --- VERIFIKASI TOKEN ---
+            // Kita gunakan Verifier resmi, bukan parse manual, biar aman
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
                     .setAudience(Collections.singletonList(clientId))
                     .build();
 
-            // PROSES INI BUTUH INTERNET DI DOCKER CONTAINER
+            // INI AKAN MENGECEK APAKAH FORMAT TOKEN BENAR & VALID KE GOOGLE
             GoogleIdToken idToken = verifier.verify(idTokenString); 
-            
-            // JIKA MACET DI SINI, BERARTI DOCKER GAK ADA INTERNET
-            
-            System.out.println(">>> [4] Verifikasi Selesai.");
 
-            if (idToken != null) {
-                GoogleIdToken.Payload googlePayload = idToken.getPayload();
-                String email = googlePayload.getEmail();
-                String name = (String) googlePayload.get("name");
-                
-                System.out.println(">>> [5] User Valid: " + email);
-
-                GoogleToken token = googleTokenRepository.findById(email).orElse(new GoogleToken());
-                token.setEmail(email);
-                if (accessToken != null) {
-                    token.setAccessToken(accessToken);
-                    token.setExpiresAt(Instant.now().plusSeconds(3600)); 
-                }
-                googleTokenRepository.save(token);
-                System.out.println(">>> [6] Token tersimpan di DB");
-
-                DefaultOAuth2User principal = new DefaultOAuth2User(
-                    Collections.emptyList(), 
-                    Map.of("sub", googlePayload.getSubject(), "name", name, "email", email), 
-                    "email"
-                );
-                
-                OAuth2AuthenticationToken auth = new OAuth2AuthenticationToken(
-                    principal, 
-                    Collections.emptyList(), 
-                    "google"
-                );
-                
-                SecurityContextHolder.getContext().setAuthentication(auth);
-                
-                HttpSession session = request.getSession(true);
-                session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
-
-                System.out.println(">>> [7] Session ID Dibuat: " + session.getId());
-
-                return ResponseEntity.ok(Map.of(
-                    "status", "success",
-                    "email", email,
-                    "session", session.getId()
-                ));
-            } else {
-                System.out.println(">>> [ERROR] Token Invalid dari Google");
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Google Invalid");
+            if (idToken == null) {
+                System.out.println(">>> [ERROR] Token Ditolak Google (Invalid/Expired)");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Google Invalid/Expired");
             }
+
+            // --- JIKA LOLOS, LANJUT ---
+            GoogleIdToken.Payload googlePayload = idToken.getPayload();
+            String email = googlePayload.getEmail();
+            String name = (String) googlePayload.get("name");
+            
+            System.out.println(">>> [3] User Valid: " + email);
+
+            GoogleToken token = googleTokenRepository.findById(email).orElse(new GoogleToken());
+            token.setEmail(email);
+            if (accessToken != null) {
+                token.setAccessToken(accessToken);
+                token.setExpiresAt(Instant.now().plusSeconds(3600)); 
+            }
+            googleTokenRepository.save(token);
+
+            DefaultOAuth2User principal = new DefaultOAuth2User(
+                Collections.emptyList(), 
+                Map.of("sub", googlePayload.getSubject(), "name", name, "email", email), 
+                "email"
+            );
+            
+            OAuth2AuthenticationToken auth = new OAuth2AuthenticationToken(
+                principal, 
+                Collections.emptyList(), 
+                "google"
+            );
+            
+            SecurityContextHolder.getContext().setAuthentication(auth);
+            
+            HttpSession session = request.getSession(true);
+            session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
+
+            System.out.println(">>> [4] Session Dibuat: " + session.getId());
+
+            return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "email", email,
+                "session", session.getId()
+            ));
+
+        } catch (IllegalArgumentException e) {
+            // INI YANG MENANGKAP TOKEN SAMPAH DARI CURL
+            System.out.println(">>> [WARN] Format Token Salah: " + e.getMessage());
+            return ResponseEntity.badRequest().body("Format Token Salah");
+            
         } catch (Exception e) {
-            System.out.println(">>> [EXCEPTION] Error Fatal:");
+            System.out.println(">>> [FATAL] Error Server: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Login Gagal: " + e.getMessage());
         }
