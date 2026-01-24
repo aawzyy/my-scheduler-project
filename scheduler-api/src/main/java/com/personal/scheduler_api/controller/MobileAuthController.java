@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,14 +30,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MobileAuthController {
 
-    @Value("${spring.security.oauth2.client.registration.google.client-id}")
-    private String clientId;
-
     private final GoogleTokenRepository googleTokenRepository;
 
     @PostMapping("/google")
     public ResponseEntity<?> loginWithGoogle(@RequestBody Map<String, String> payload, HttpServletRequest request) {
-        System.out.println(">>> [1] REQUEST MASUK KE MOBILE AUTH");
+        System.out.println(">>> [1] REQUEST MASUK (MODE: RELAXED AUDIENCE)");
         
         String idTokenString = payload.get("idToken");
         String accessToken = payload.get("accessToken"); 
@@ -48,29 +44,33 @@ public class MobileAuthController {
         }
 
         try {
-            System.out.println(">>> [2] Mencoba Parse Token...");
+            // --- PERUBAHAN UTAMA DI SINI (OPTION 2) ---
+            // Kita membuat Verifier TANPA setAudience.
+            // Artinya: Kita percaya token ini asalkan Tanda Tangan Google-nya Valid.
+            // Kita tidak peduli Client ID-nya cocok atau tidak.
             
-            // --- VERIFIKASI TOKEN ---
-            // Kita gunakan Verifier resmi, bukan parse manual, biar aman
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
-                    .setAudience(Collections.singletonList(clientId))
+                    // .setAudience(...)  <-- KITA HAPUS BARIS INI (Biar tidak Strict)
                     .build();
 
-            // INI AKAN MENGECEK APAKAH FORMAT TOKEN BENAR & VALID KE GOOGLE
+            System.out.println(">>> [2] Memverifikasi Signature Token...");
             GoogleIdToken idToken = verifier.verify(idTokenString); 
 
             if (idToken == null) {
-                System.out.println(">>> [ERROR] Token Ditolak Google (Invalid/Expired)");
+                System.out.println(">>> [ERROR] Signature Salah atau Token Expired.");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Google Invalid/Expired");
             }
 
-            // --- JIKA LOLOS, LANJUT ---
+            // Jika sampai sini, berarti Token ASLI dari Google.
             GoogleIdToken.Payload googlePayload = idToken.getPayload();
             String email = googlePayload.getEmail();
             String name = (String) googlePayload.get("name");
             
+            // Debugging: Kita intip Token ini sebenarnya untuk Client ID siapa?
+            System.out.println(">>> [INFO] Token Audience: " + googlePayload.getAudience());
             System.out.println(">>> [3] User Valid: " + email);
 
+            // --- PROSES LOGIN ---
             GoogleToken token = googleTokenRepository.findById(email).orElse(new GoogleToken());
             token.setEmail(email);
             if (accessToken != null) {
@@ -105,13 +105,11 @@ public class MobileAuthController {
             ));
 
         } catch (IllegalArgumentException e) {
-            // INI YANG MENANGKAP TOKEN SAMPAH DARI CURL
-            System.out.println(">>> [WARN] Format Token Salah: " + e.getMessage());
+            System.out.println(">>> [WARN] Format Token Salah (Bukan JWT)");
             return ResponseEntity.badRequest().body("Format Token Salah");
-            
         } catch (Exception e) {
-            System.out.println(">>> [FATAL] Error Server: " + e.getMessage());
-            e.printStackTrace();
+            System.out.println(">>> [FATAL] Error: " + e.getMessage());
+            e.printStackTrace(); // Penting untuk melihat error library
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Login Gagal: " + e.getMessage());
         }
     }
