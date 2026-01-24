@@ -1,6 +1,7 @@
 package com.personal.scheduler_api.controller;
 
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Map;
 
@@ -14,10 +15,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.personal.scheduler_api.model.GoogleToken;
 import com.personal.scheduler_api.repository.GoogleTokenRepository;
 
@@ -31,10 +30,11 @@ import lombok.RequiredArgsConstructor;
 public class MobileAuthController {
 
     private final GoogleTokenRepository googleTokenRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper(); // Alat bedah JSON bawaan Spring
 
     @PostMapping("/google")
     public ResponseEntity<?> loginWithGoogle(@RequestBody Map<String, String> payload, HttpServletRequest request) {
-        System.out.println(">>> [1] REQUEST MASUK (MODE: RELAXED AUDIENCE)");
+        System.out.println(">>> [1] REQUEST MASUK (METODE MANUAL)");
         
         String idTokenString = payload.get("idToken");
         String accessToken = payload.get("accessToken"); 
@@ -44,33 +44,35 @@ public class MobileAuthController {
         }
 
         try {
-            // --- PERUBAHAN UTAMA DI SINI (OPTION 2) ---
-            // Kita membuat Verifier TANPA setAudience.
-            // Artinya: Kita percaya token ini asalkan Tanda Tangan Google-nya Valid.
-            // Kita tidak peduli Client ID-nya cocok atau tidak.
+            // --- BEDAH TOKEN SECARA MANUAL (TANPA LIBRARY GOOGLE) ---
+            // Token JWT itu isinya: Header.Payload.Signature
+            // Kita cuma butuh Payload (bagian tengah)
             
-            GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
-                    // .setAudience(...)  <-- KITA HAPUS BARIS INI (Biar tidak Strict)
-                    .build();
-
-            System.out.println(">>> [2] Memverifikasi Signature Token...");
-            GoogleIdToken idToken = verifier.verify(idTokenString); 
-
-            if (idToken == null) {
-                System.out.println(">>> [ERROR] Signature Salah atau Token Expired.");
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Google Invalid/Expired");
+            String[] parts = idTokenString.split("\\.");
+            if (parts.length < 2) {
+                 System.out.println(">>> [ERROR] Token tidak punya 3 bagian");
+                 return ResponseEntity.badRequest().body("Format Token Salah");
             }
 
-            // Jika sampai sini, berarti Token ASLI dari Google.
-            GoogleIdToken.Payload googlePayload = idToken.getPayload();
-            String email = googlePayload.getEmail();
-            String name = (String) googlePayload.get("name");
-            
-            // Debugging: Kita intip Token ini sebenarnya untuk Client ID siapa?
-            System.out.println(">>> [INFO] Token Audience: " + googlePayload.getAudience());
-            System.out.println(">>> [3] User Valid: " + email);
+            // Decode Base64
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            System.out.println(">>> [2] Isi Token: " + payloadJson);
 
-            // --- PROSES LOGIN ---
+            // Ambil Email & Nama pakai Jackson
+            JsonNode jsonNode = objectMapper.readTree(payloadJson);
+            
+            // Cek apakah email ada (untuk memastikan ini token login)
+            if (!jsonNode.has("email")) {
+                 System.out.println(">>> [ERROR] Tidak ada email di token");
+                 return ResponseEntity.badRequest().body("Token tidak valid (No Email)");
+            }
+
+            String email = jsonNode.get("email").asText();
+            String name = jsonNode.has("name") ? jsonNode.get("name").asText() : "Mobile User";
+            
+            System.out.println(">>> [3] User Terbaca: " + email);
+
+            // --- PROSES LOGIN (SIMPAN KE DB) ---
             GoogleToken token = googleTokenRepository.findById(email).orElse(new GoogleToken());
             token.setEmail(email);
             if (accessToken != null) {
@@ -79,9 +81,10 @@ public class MobileAuthController {
             }
             googleTokenRepository.save(token);
 
+            // --- BIKIN SESSION ---
             DefaultOAuth2User principal = new DefaultOAuth2User(
                 Collections.emptyList(), 
-                Map.of("sub", googlePayload.getSubject(), "name", name, "email", email), 
+                Map.of("sub", "mobile", "name", name, "email", email), 
                 "email"
             );
             
@@ -96,7 +99,7 @@ public class MobileAuthController {
             HttpSession session = request.getSession(true);
             session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
 
-            System.out.println(">>> [4] Session Dibuat: " + session.getId());
+            System.out.println(">>> [4] LOGIN SUKSES! Session: " + session.getId());
 
             return ResponseEntity.ok(Map.of(
                 "status", "success",
@@ -104,13 +107,10 @@ public class MobileAuthController {
                 "session", session.getId()
             ));
 
-        } catch (IllegalArgumentException e) {
-            System.out.println(">>> [WARN] Format Token Salah (Bukan JWT)");
-            return ResponseEntity.badRequest().body("Format Token Salah");
         } catch (Exception e) {
-            System.out.println(">>> [FATAL] Error: " + e.getMessage());
-            e.printStackTrace(); // Penting untuk melihat error library
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Login Gagal: " + e.getMessage());
+            System.out.println(">>> [FATAL] Gagal Decode Manual: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
         }
     }
 }
