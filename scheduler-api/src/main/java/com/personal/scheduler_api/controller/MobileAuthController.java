@@ -31,7 +31,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MobileAuthController {
 
-    // Mengambil Client ID dari application.yml
     @Value("${spring.security.oauth2.client.registration.google.client-id}")
     private String clientId;
 
@@ -39,31 +38,40 @@ public class MobileAuthController {
 
     @PostMapping("/google")
     public ResponseEntity<?> loginWithGoogle(@RequestBody Map<String, String> payload, HttpServletRequest request) {
+        System.out.println(">>> [1] REQUEST MASUK KE MOBILE AUTH");
+        
         String idTokenString = payload.get("idToken");
         String accessToken = payload.get("accessToken"); 
 
-        System.out.println(">>> MOBILE LOGIN REQUEST DITERIMA");
+        if (idTokenString == null) {
+            System.out.println(">>> [ERROR] Token Mobile Kosong!");
+            return ResponseEntity.badRequest().body("Token Kosong");
+        }
+
+        System.out.println(">>> [2] ID Token diterima (panjang: " + idTokenString.length() + ")");
 
         try {
-            // 1. Verifikasi Token ke Google (Validasi Keaslian)
-            // Ini memastikan token benar-benar dari Google, bukan buatan hacker
+            System.out.println(">>> [3] Memulai Verifikasi ke Google Server...");
+            
+            // Verifier
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
                     .setAudience(Collections.singletonList(clientId))
                     .build();
 
-            // GoogleIdToken idToken = verifier.verify(idTokenString); 
-            // NOTE: Jika verifier.verify gagal (karena beda audience Android vs Web), 
-            // gunakan parsing manual payload dulu untuk dev:
-            GoogleIdToken idToken = GoogleIdToken.parse(new GsonFactory(), idTokenString);
+            // PROSES INI BUTUH INTERNET DI DOCKER CONTAINER
+            GoogleIdToken idToken = verifier.verify(idTokenString); 
+            
+            // JIKA MACET DI SINI, BERARTI DOCKER GAK ADA INTERNET
+            
+            System.out.println(">>> [4] Verifikasi Selesai.");
 
             if (idToken != null) {
                 GoogleIdToken.Payload googlePayload = idToken.getPayload();
                 String email = googlePayload.getEmail();
                 String name = (String) googlePayload.get("name");
                 
-                System.out.println(">>> USER TERVERIFIKASI: " + email);
+                System.out.println(">>> [5] User Valid: " + email);
 
-                // 2. Simpan/Update Token di Database
                 GoogleToken token = googleTokenRepository.findById(email).orElse(new GoogleToken());
                 token.setEmail(email);
                 if (accessToken != null) {
@@ -71,8 +79,8 @@ public class MobileAuthController {
                     token.setExpiresAt(Instant.now().plusSeconds(3600)); 
                 }
                 googleTokenRepository.save(token);
+                System.out.println(">>> [6] Token tersimpan di DB");
 
-                // 3. FORCE LOGIN (Bikin Session Spring Security Manual)
                 DefaultOAuth2User principal = new DefaultOAuth2User(
                     Collections.emptyList(), 
                     Map.of("sub", googlePayload.getSubject(), "name", name, "email", email), 
@@ -87,11 +95,10 @@ public class MobileAuthController {
                 
                 SecurityContextHolder.getContext().setAuthentication(auth);
                 
-                // 4. Buat Session JSESSIONID
                 HttpSession session = request.getSession(true);
                 session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
 
-                System.out.println(">>> SESSION DIBUAT: " + session.getId());
+                System.out.println(">>> [7] Session ID Dibuat: " + session.getId());
 
                 return ResponseEntity.ok(Map.of(
                     "status", "success",
@@ -99,9 +106,11 @@ public class MobileAuthController {
                     "session", session.getId()
                 ));
             } else {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Invalid");
+                System.out.println(">>> [ERROR] Token Invalid dari Google");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Token Google Invalid");
             }
         } catch (Exception e) {
+            System.out.println(">>> [EXCEPTION] Error Fatal:");
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Login Gagal: " + e.getMessage());
         }
