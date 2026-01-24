@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers(new AntPathRequestMatcher("/api/availability/check")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/appointments", "POST")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/success")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/api/mobile/auth/**")).permitAll() // <--- TAMBAH INI
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
