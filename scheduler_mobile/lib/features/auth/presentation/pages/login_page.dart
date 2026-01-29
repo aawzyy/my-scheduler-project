@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:dio/dio.dart';
-import 'package:cookie_jar/cookie_jar.dart';
-import '../../../../core/services/injection_container.dart';
+import 'package:flutter_mobx/flutter_mobx.dart'; // Wajib untuk Observer
+import 'package:mobx/mobx.dart';
+import '../../../../core/services/injection_container.dart'; // Akses sl<>
+import '../stores/login_store.dart';
 import '../../../appointment/presentation/pages/dashboard_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -13,71 +13,46 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // Inisialisasi Google Sign In
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    // Scopes wajib agar backend bisa akses kalender
-    scopes: ['email', 'https://www.googleapis.com/auth/calendar'],
-  );
+  // 1. Ambil Store dari Injection Container
+  final LoginStore _loginStore = sl<LoginStore>();
 
-  bool isLoading = false;
+  // Disposer untuk mematikan reaksi saat halaman ditutup
+  late ReactionDisposer _disposer;
 
-  Future<void> _handleGoogleSignIn() async {
-    setState(() => isLoading = true);
-    try {
-      // 1. Buka Popup Login Native Android (Anti-Blokir!)
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+  @override
+  void initState() {
+    super.initState();
 
-      if (googleUser == null) {
-        setState(() => isLoading = false);
-        return; // User batal login
-      }
-
-      // 2. Ambil Token dari Google
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-      final String? idToken = googleAuth.idToken;
-      final String? accessToken = googleAuth.accessToken;
-
-      if (idToken != null) {
-        await _sendTokenToBackend(idToken, accessToken);
-      }
-    } catch (error) {
-      print(error);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Login Gagal: $error')));
-      setState(() => isLoading = false);
-    }
-  }
-
-  Future<void> _sendTokenToBackend(String idToken, String? accessToken) async {
-    final dio = sl<Dio>(); // Dio yang sudah di-inject CookieJar
-
-    try {
-      // 3. Kirim Token ke Backend Spring Boot
-      final response = await dio.post(
-        '/api/mobile/auth/google',
-        data: {'idToken': idToken, 'accessToken': accessToken},
-      );
-
-      if (response.statusCode == 200) {
-        print(">>> LOGIN SUKSES! Session tersimpan otomatis oleh Dio.");
-
-        // 4. Pindah ke Dashboard
+    // 2. Pasang "Mata-mata" (Reaction)
+    // Jika variable user di Store terisi (artinya sukses login), pindah halaman.
+    _disposer = reaction((_) => _loginStore.user, (user) {
+      if (user != null) {
         if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Selamat Datang, ${user.name ?? "User"}!')),
+          );
+          // Pindah ke Dashboard
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const DashboardPage()),
           );
         }
       }
-    } catch (e) {
-      print(">>> API ERROR: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gagal verifikasi di server')),
-      );
-    } finally {
-      setState(() => isLoading = false);
-    }
+    });
+
+    // Reaksi jika ada Error
+    reaction((_) => _loginStore.errorMessage, (String? msg) {
+      if (msg != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposer(); // Matikan reaksi biar gak memori leak
+    super.dispose();
   }
 
   @override
@@ -85,35 +60,63 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
-        child: isLoading
-            ? const CircularProgressIndicator()
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.calendar_today,
-                    size: 80,
-                    color: Colors.indigo,
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Login Owner",
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 40),
-                  ElevatedButton.icon(
-                    onPressed: _handleGoogleSignIn,
-                    icon: const Icon(Icons.login),
-                    label: const Text("Masuk dengan Google"),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 15,
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.calendar_month_outlined,
+                size: 100,
+                color: Colors.indigo,
+              ),
+              const SizedBox(height: 30),
+              const Text(
+                "Scheduler Owner",
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 50),
+
+              // 3. UI yang bereaksi (Observer)
+              // Bagian ini akan otomatis rebuild kalau isLoading berubah
+              Observer(
+                builder: (_) {
+                  if (_loginStore.isLoading) {
+                    return const Column(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 20),
+                        Text(
+                          "Sedang Masuk...",
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        // Panggil fungsi di Store (Clean!)
+                        // UI tidak perlu tahu soal Dio/Token/Cookie
+                        _loginStore.login();
+                      },
+                      icon: const Icon(Icons.login),
+                      label: const Text("Masuk dengan Google"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        elevation: 2,
                       ),
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
+            ],
+          ),
+        ),
       ),
     );
   }

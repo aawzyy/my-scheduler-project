@@ -9,4 +9,5 @@ abstract class AppointmentRepository {
   // Aksi Bos: Terima & Tolak
   Future<Either<Failure, void>> approveAppointment(String id);
   Future<Either<Failure, void>> rejectAppointment(String id);
+  Future<Either<Failure, void>> createQuickTask(Map<String, dynamic> payload);
 }
