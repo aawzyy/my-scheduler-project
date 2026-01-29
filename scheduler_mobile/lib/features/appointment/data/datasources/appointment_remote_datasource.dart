@@ -55,7 +55,7 @@ class AppointmentRemoteDataSourceImpl implements AppointmentRemoteDataSource {
       if (e.response?.statusCode == 200 || e.response?.statusCode == 201) {
         return; // Abaikan error, anggap sukses
       }
-      throw Exception("Gagal approve: ${e.message}");
+      throw Exception("Gagal approve karena: ${e.message}");
     }
   }
 
